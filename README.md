@@ -79,7 +79,7 @@ if __name__ == "__main__":
     )
 ```
 
-For a complete implementation, see the `ui_improved.py` file.
+For a complete implementation, see the `ui.py` file.
 
 ## Data Collection
 The UI saves all feedback to a CSV file (`user_feedback.csv`) with the following structure:
