@@ -17,3 +17,4 @@ torchvision  # For visual language models
 transformers>=4.43 # For Whisper
 hf_transfer # for faster models download, should used with env var HF_HUB_ENABLE_HF_TRANSFER=1
 gradio==5.21.0
+nncf==2.15.0
