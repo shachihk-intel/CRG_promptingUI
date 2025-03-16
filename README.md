@@ -25,7 +25,7 @@ optimum-cli export openvino --trust-remote-code --model meta-llama/Meta-Llama-3-
 To run the UI and start generating responses:
 
 ```bash
-python ui_improved.py
+python ui.py
 ```
 
 This will start the Gradio interface at http://0.0.0.0:8051
@@ -33,7 +33,7 @@ This will start the Gradio interface at http://0.0.0.0:8051
 ## UI Features
 The UI provides the following features:
 
-1. **Model Selection**: Choose from Llama-2-7b, Llama-3-8B, or Llama-3.2-3B models
+1. **Model Selection**: Choose from Llama-2-7b, Llama-3-8B, or Llama-3.2-3B models. You can add any new models by adding to the "MODELS" variable in ui.py and using optimum-cli to export the model. 
 2. **Task Types**:
    - Direct Response Generation
    - Keyword Generation
