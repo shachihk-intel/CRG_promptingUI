@@ -13,12 +13,12 @@ Step2: Install the requirements
 pip install -r requirements.txt
 ```
 
-## Convert your models to openvino format
+## Convert and compress your text generation model from Hugging Face library
 ```bash
 # Convert Llama models to OpenVINO format. The UI currently provides three choices (as below). But any additional model can be easily added. 
-optimum-cli export openvino --trust-remote-code --model meta-llama/Llama-3.2-3B-Instruct Llama-3.2-3B-Instruct
-optimum-cli export openvino --trust-remote-code --model meta-llama/Llama-2-7b-chat-hf Llama-2-7b-chat-hf
-optimum-cli export openvino --trust-remote-code --model meta-llama/Meta-Llama-3-8B-Instruct Meta-Llama-3-8B-Instruct
+optimum-cli export openvino --trust-remote-code --weight-format int4 --model meta-llama/Llama-3.2-3B-Instruct Llama-3.2-3B-Instruct
+optimum-cli export openvino --trust-remote-code --weight-format int4 --model meta-llama/Llama-2-7b-chat-hf Llama-2-7b-chat-hf
+optimum-cli export openvino --trust-remote-code --weight-format int4 --model meta-llama/Meta-Llama-3-8B-Instruct Meta-Llama-3-8B-Instruct
 ```
 
 ## Running the UI
