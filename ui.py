@@ -35,21 +35,29 @@ def load_model(model_choice):
         # Update UI to show loading status
         status = f"Loading {model_choice}... Please wait."
         
-        ### For using any other model from huggingface , use transformers functionality here
-        ### Load tokenizer
-        # tokenizer = AutoTokenizer.from_pretrained(model_choice)
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_choice)
         
-        # pipeline = transformers.pipeline(
-        #         "text-generation", 
-        #         model=model_choice, 
-        #         torch_dtype=torch.bfloat16, 
-        #         device_map="auto"
-        #     )
+        # Handle different model types
+        if "GPTQ" in model_choice:
+            pipeline = transformers.pipeline(
+                "text-generation",
+                model=model_choice,
+                tokenizer=tokenizer, 
+                device_map="auto"
+            )
+        elif "tiny" in model_choice.lower():
+            pipeline = transformers.pipeline(
+                "text-generation", 
+                model="TinyLlama/TinyLlama-1.1B-Chat-v1.0", 
+                torch_dtype=torch.bfloat16, 
+                device_map="auto"
+            )
+        else:
+            # For OpenVINO models
+            device = 'CPU'
+            pipeline = openvino_genai.LLMPipeline(model_choice, device)
         
-        # For OpenVINO models
-        device = 'CPU'
-        pipeline = openvino_genai.LLMPipeline(model_choice, device)
-    
         return f"✅ {model_choice} loaded successfully! Ready to generate responses."
     
     except Exception as e:
@@ -124,15 +132,23 @@ def log_generation(task, model, prompt, context, responses):
     df = pd.DataFrame([log_data])
     df.to_csv(LOG_FILE, mode='a', header=not os.path.exists(LOG_FILE), index=False)
 
-def save_feedback(task, model, prompt, context, response1, response2, response3, response4, response5, like_all, selected_idx, rating, feedback_text):
+def save_feedback(task, model, prompt, context, response1, response2, response3, response4, response5, 
+               like_all, cb1, cb2, cb3, cb4, cb5, rating, feedback_text):
     """Save user feedback to CSV file"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Determine the selected response
+    # Prepare selected responses string
+    selected_responses = []
     if like_all:
-        selected = "All Responses"
+        selected_responses.append("All Responses")
     else:
-        selected = selected_idx if selected_idx is not None else ""
+        if cb1: selected_responses.append("Response 1")
+        if cb2: selected_responses.append("Response 2")
+        if cb3: selected_responses.append("Response 3")
+        if cb4: selected_responses.append("Response 4")
+        if cb5: selected_responses.append("Response 5")
+    
+    selected = ", ".join(selected_responses) if selected_responses else "None selected"
     
     # Prepare data for saving
     feedback_data = {
@@ -157,9 +173,10 @@ def save_feedback(task, model, prompt, context, response1, response2, response3,
     
     return "✅ Feedback saved successfully! Thank you for your input."
 
-def toggle_response_selector(like_all):
-    """Disable/enable the response selector based on "like all" checkbox"""
-    return gr.update(interactive=not like_all)
+# Define a function to toggle checkbox interactivity
+def toggle_response_checkboxes(like_all):
+    """Disable/enable response checkboxes based on 'like all' checkbox"""
+    return [gr.update(interactive=not like_all) for _ in range(5)]
 
 def load_feedback_data():
     """Load saved feedback data for display"""
@@ -178,10 +195,11 @@ with gr.Blocks(title=TITLE) as demo:
                 with gr.Column(scale=2):
                     # Input section
                     gr.Markdown("### Model Selection")
-                    model_choice = gr.Dropdown(
+                    model_choice = gr.Radio(
                         choices=MODELS, 
                         label="Select Model",
-                        info="Choose the language model to use"
+                        info="Choose the language model to use",
+                        container=False
                     )
                     model_status = gr.Textbox(
                         label="Model Status", 
@@ -224,15 +242,15 @@ with gr.Blocks(title=TITLE) as demo:
                     
                     # Feedback section
                     gr.Markdown("### Provide Feedback")
-                    like_all_responses = gr.Checkbox(
-                        label="I like all responses",
-                        info="Check this if you like all the generated responses"
-                    )
-                    selected_response = gr.Radio(
-                        choices=[f"Response {i+1}" for i in range(5)], 
-                        label="Select Best Response (Optional)",
-                        info="Select your favorite response (if you haven't checked 'I like all responses')"
-                    )
+                    gr.Markdown("Select your favorite response(s):")
+                    with gr.Row():
+                        like_all_responses = gr.Checkbox(label="I like all responses")
+                    
+                    with gr.Row():
+                        response_checkboxes = []
+                        for i in range(5):
+                            cb = gr.Checkbox(label=f"Response {i+1}")
+                            response_checkboxes.append(cb)
                     feedback_rating = gr.Slider(
                         minimum=1, 
                         maximum=5, 
@@ -282,15 +300,21 @@ with gr.Blocks(title=TITLE) as demo:
         inputs=[
             task_choice, model_choice, prompt, context, 
             response_boxes[0], response_boxes[1], response_boxes[2], response_boxes[3], response_boxes[4],
-            like_all_responses, selected_response, feedback_rating, feedback_text
+            like_all_responses, 
+            response_checkboxes[0], response_checkboxes[1], response_checkboxes[2], response_checkboxes[3], response_checkboxes[4],
+            feedback_rating, feedback_text
         ],
         outputs=[feedback_status]
     )
     
+    # Add interaction between "like all" checkbox and the individual response checkboxes
+    def toggle_response_checkboxes(like_all):
+        return [gr.update(interactive=not like_all) for _ in range(5)]
+    
     like_all_responses.change(
-        fn=toggle_response_selector,
+        fn=toggle_response_checkboxes,
         inputs=[like_all_responses],
-        outputs=[selected_response]
+        outputs=response_checkboxes
     )
     
     refresh_btn.click(
