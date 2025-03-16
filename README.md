@@ -14,7 +14,8 @@ pip install -r requirements.txt
 ```
 
 ## Convert and compress your text generation model from Hugging Face library
-### List of models are available here: https://github.com/openvinotoolkit/openvino.genai/blob/master/SUPPORTED_MODELS.md
+### List of models are available here: 
+https://github.com/openvinotoolkit/openvino.genai/blob/master/SUPPORTED_MODELS.md
 
 ```bash
 # Convert Llama models to OpenVINO format. The UI currently provides three choices (as below). But any additional model can be easily added. 
