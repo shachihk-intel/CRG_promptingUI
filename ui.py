@@ -1,142 +1,314 @@
 import gradio as gr
-from transformers import pipeline, AutoTokenizer
-from transformers import AutoTokenizer, BitsAndBytesConfig, pipeline
 import transformers
 import torch
+import openvino_genai
+import os
+import pandas as pd
+from datetime import datetime
+from transformers import AutoTokenizer
 
-title="CRG prompt engineering"
-desc="Try out multiple models and multiple prompts"
-# long_desc="This is a UI for team brainstorming"
-model = "meta-llama/Llama-2-7b-chat-hf"
+# Constants
+TITLE = "CRG Prompt Engineering"
+DESCRIPTION = "Try different models and prompts to generate responses, then provide feedback"
+MODELS = ["Llama-2-7b-chat-hf", "Meta-Llama-3-8B-Instruct", "Llama-3.2-3B-Instruct"]
+TASKS = ["Direct Response Generation", "Keyword Generation", "Keyword-based Response Generation"]
+FEEDBACK_FILE = "user_feedback.csv"
+LOG_FILE = "generation_log.csv"
 
-tokenizer = AutoTokenizer.from_pretrained(model)
+# Create feedback file with headers if it doesn't exist
+if not os.path.exists(FEEDBACK_FILE):
+    pd.DataFrame(columns=[
+        "timestamp", "task", "model", "prompt", "context", 
+        "response1", "response2", "response3", "response4", "response5", 
+        "selected_response", "feedback_score", "feedback_text"
+    ]).to_csv(FEEDBACK_FILE, index=False)
 
-pipeline = transformers.pipeline("text-generation",model=model,
-        model_kwargs={"load_in_4bit": True}, 
-        torch_dtype=torch.bfloat16,device_map="auto",)
+# Initialize global variables
+pipeline = None
+tokenizer = None
 
-callback = gr.CSVLogger()
-
-
-def direct(task, text, prompt, model):
-
-    #out = pipeline(prompt+text,do_sample=True,top_k=10,num_return_sequences=5,eos_token_id=tokenizer.eos_token_id,max_length=100,)
-    out = pipeline(prompt+text,do_sample=False,num_return_sequences=5,num_beams=5, num_beam_groups=5,diversity_penalty=10.5,eos_token_id=tokenizer.eos_token_id,max_length=100,)
-    print(f"gpu used {torch.cuda.max_memory_allocated(device=None)/1000000000} GB memory")
-    #pipe = pipeline("text-generation", model=model,tokenizer=chatbot_tokenizer, num_return_sequences=5, num_beams=5)
-    #print("chatbot_tokenizer.encode(chatbot_tokenizer.eos_token = ",chatbot_tokenizer.eos_token)
-    #out = pipe(text+chatbot_tokenizer.eos_token)
-    text_all = []
-    for each in out:
-        toappend = each["generated_text"][len(prompt+text):]
-        toappend = toappend.split("Visitor")[0]
-        text_all.append(toappend+"\n")
-
-    fout=open("continuousLog.txt", "a")
-    fout.write("Task:"+task+"\n"+"Model:"+model+"\n"+"Prompt:"+prompt+"\n"+"Context:"+text+"\nResponse1:"+text_all[0]+"\nResponse2:"+text_all[1]+"\nResponse3:"+text_all[2]+"\nResponse4:"+text_all[3]+"\nResponse5:"+text_all[4]+"\n-------------\n")
-    fout.close()
-    return text_all[0:5]
-
-
-def predict(task, dialog,prompt, model):
-    if(task=="Direct Response Generation"):
-        return_text = direct(task, dialog, prompt, model)
-
-    elif(task =="Keyword Generation"):
-        return_text = direct(task, dialog, prompt, model)
-
-    elif(task =="Keyword-based Response Generation"):
-        return_text = direct(task, dialog, prompt, model)
-    return return_text
-
-
-
-def load_model(modelchoice, get_resp_btn):
-    get_resp_btn = "Wait, model loading!"
-    global model
-    global tokenizer
-    global pipeline
-    global llamaLoaded
-    global zephyrLoaded
-    global phiLoaded
-    model = modelchoice
-    tokenizer = AutoTokenizer.from_pretrained(model)
-    pipeline = transformers.pipeline("text-generation",model=model,
-        model_kwargs={"load_in_4bit": True}, 
-        torch_dtype=torch.bfloat16,device_map="auto",trust_remote_code=True)
-    get_resp_btn = "Now get response!"
-    return get_resp_btn
+def load_model(model_choice):
+    """Load the selected model and return a status message"""
+    global pipeline, tokenizer
     
+    try:
+        # Update UI to show loading status
+        status = f"Loading {model_choice}... Please wait."
+        
+        ### For using any other model from huggingface , use transformers functionality here
+        ### Load tokenizer
+        # tokenizer = AutoTokenizer.from_pretrained(model_choice)
+        
+        # pipeline = transformers.pipeline(
+        #         "text-generation", 
+        #         model=model_choice, 
+        #         torch_dtype=torch.bfloat16, 
+        #         device_map="auto"
+        #     )
+        
+        # For OpenVINO models
+        device = 'CPU'
+        pipeline = openvino_genai.LLMPipeline(model_choice, device)
+    
+        return f"✅ {model_choice} loaded successfully! Ready to generate responses."
+    
+    except Exception as e:
+        return f"❌ Error loading model: {str(e)}"
 
-def change_response_button(modelchoice, get_resp_btn):
-    get_resp_btn = "Wait, model loading!"
-    return get_resp_btn
-   
-
-
-def change_textboxes(taskchoice, context, prompt):
-    if(taskchoice=="Keyword Generation"):
+def update_task_template(task_choice):
+    """Update prompt and context based on selected task"""
+    if task_choice == "Keyword Generation":
         prompt = "The given conversation could have multiple responses. Give out a keyword, one per response, for each possible diverse response."
         context = "Visitor: hey how are you?\nUser: I am good how are you?\nVisitor: I am fine too. What plans for the weekend?\nPossible Response Keywords: "
-        return (prompt, context)
-    elif(taskchoice=="Keyword-based Response Generation"):
-        prompt = "Generate a response as the user, using the given keyword. \n Keyword: sick\n",
+    
+    elif task_choice == "Keyword-based Response Generation":
+        prompt = "Generate a response as the user, using the given keyword.\nKeyword: sick"
         context = "Visitor: hey how are you?\nUser: I am good how are you?\nVisitor: I am fine too. What plans for the weekend?\nUser: "
-        return (prompt, context) 
-    elif(taskchoice=="Direct Response Generation"):
-        prompt = "Generate a response for the given conversation",
+    
+    elif task_choice == "Direct Response Generation":
+        prompt = "Generate a response for the given conversation"
         context = "Visitor: hey how are you?\nUser: I am good how are you?\nVisitor: I am fine too. What plans for the weekend?\nUser: "
-        return (prompt, context) 
+    
+    return prompt, context
 
+def generate_responses(task, context, prompt, model_choice):
+    """Generate multiple responses using the loaded model"""
+    global pipeline
+    
+    if pipeline is None:
+        return ["Please load a model first"] * 5
+    
+    try:
+        # Configure generation parameters
+        config = openvino_genai.GenerationConfig()
+        config.num_beams = 5
+        config.num_return_sequences = 5
+        config.max_new_tokens = 50  # Increased token count for more substantive responses
+        
+        # Generate responses
+        results = pipeline.generate(prompt + context, config)
+        
+        # Extract generated texts
+        responses = results.texts if hasattr(results, 'texts') else []
+        
+        # Fill with empty strings if we don't have enough responses
+        while len(responses) < 5:
+            responses.append("")
+        
+        # Log generation details
+        log_generation(task, model_choice, prompt, context, responses)
+        
+        return responses[:5]
+    
+    except Exception as e:
+        print(f"Error generating responses: {str(e)}")
+        return [f"Error: {str(e)}"] + [""] * 4
 
-def save(taskchoice, modelchoice, context, prompt , new_title,new_title2,new_title3,new_title4,new_title5):
-    fout=open("saved.csv", "a")
-    fout.write("Task:"+taskchoice+"\n"+"Model:"+modelchoice+"\n"+"Prompt:"+prompt+"\n"+"Context:"+context+"\nResponse1:"+new_title+"\nResponse2:"+new_title2+"\nResponse3:"+new_title3+"\nResponse4:"+new_title4+"\nResponse5:"+new_title5+"\n-------------\n")
-    fout.close()
-     
+def log_generation(task, model, prompt, context, responses):
+    """Log generation details to CSV file"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    log_data = {
+        "timestamp": timestamp,
+        "task": task,
+        "model": model,
+        "prompt": prompt,
+        "context": context
+    }
+    
+    # Add responses
+    for i, resp in enumerate(responses[:5], 1):
+        log_data[f"response{i}"] = resp
+    
+    # Create or append to log file
+    df = pd.DataFrame([log_data])
+    df.to_csv(LOG_FILE, mode='a', header=not os.path.exists(LOG_FILE), index=False)
 
+def save_feedback(task, model, prompt, context, response1, response2, response3, response4, response5, like_all, selected_idx, rating, feedback_text):
+    """Save user feedback to CSV file"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Determine the selected response
+    if like_all:
+        selected = "All Responses"
+    else:
+        selected = selected_idx if selected_idx is not None else ""
+    
+    # Prepare data for saving
+    feedback_data = {
+        "timestamp": timestamp,
+        "task": task,
+        "model": model,
+        "prompt": prompt,
+        "context": context,
+        "response1": response1,
+        "response2": response2,
+        "response3": response3,
+        "response4": response4,
+        "response5": response5,
+        "selected_response": selected,
+        "feedback_score": rating,
+        "feedback_text": feedback_text
+    }
+    
+    # Save to CSV
+    df = pd.DataFrame([feedback_data])
+    df.to_csv(FEEDBACK_FILE, mode='a', header=False, index=False)
+    
+    return "✅ Feedback saved successfully! Thank you for your input."
 
-models = ["meta-llama/Llama-2-7b-chat-hf", "HuggingFaceH4/zephyr-7b-beta", "microsoft/phi-2"]
-tasks = ["Direct Response Generation", "Keyword Generation", "Keyword-based Response Generation"]
+def toggle_response_selector(like_all):
+    """Disable/enable the response selector based on "like all" checkbox"""
+    return gr.update(interactive=not like_all)
 
-demo = gr.Blocks()
-with demo:
-    with gr.Row():
+def load_feedback_data():
+    """Load saved feedback data for display"""
+    if os.path.exists(FEEDBACK_FILE):
+        return pd.read_csv(FEEDBACK_FILE)
+    return pd.DataFrame()
 
-        with gr.Column(scale=2):
-            gr.Markdown(""" 
-            # CRG prompt engineering
-            Try out multiple models and multiple prompts 
-            """)
-
-            taskchoice = gr.Radio(choices=tasks, label="Task")
-            context = gr.Textbox(label="Dialog Context", info="Enter the dialog context for generating response",
-                    value="Visitor: hey how are you?\nUser: I am good how are you?\nVisitor: I am fine too. What plans for the weekend?\nUser: ",
+# Build the UI
+with gr.Blocks(title=TITLE) as demo:
+    gr.Markdown(f"# {TITLE}")
+    gr.Markdown(f"{DESCRIPTION}")
+    
+    with gr.Tabs():
+        with gr.TabItem("Generate Responses"):
+            with gr.Row():
+                with gr.Column(scale=2):
+                    # Input section
+                    gr.Markdown("### Model Selection")
+                    model_choice = gr.Dropdown(
+                        choices=MODELS, 
+                        label="Select Model",
+                        info="Choose the language model to use"
                     )
-            prompt = gr.Textbox(label="Prompt", info="Prompt for generating response",
-                    value="Generate a response as the user, using the given keyword. \nKeyword: sick\n",
-                )
-            modelchoice = gr.Radio(choices=models, label="Model")
+                    model_status = gr.Textbox(
+                        label="Model Status", 
+                        value="No model loaded", 
+                        interactive=False
+                    )
+                    load_model_btn = gr.Button("Load Selected Model")
+                    
+                    gr.Markdown("### Task Configuration")
+                    task_choice = gr.Radio(
+                        choices=TASKS, 
+                        label="Task Type", 
+                        value=TASKS[0],
+                        info="Choose the type of generation task"
+                    )
+                    prompt = gr.Textbox(
+                        label="Prompt", 
+                        info="Instructions for the model",
+                        lines=3
+                    )
+                    context = gr.Textbox(
+                        label="Conversation Context", 
+                        info="The conversation history or context for generation",
+                        lines=5
+                    )
+                    
+                    generate_btn = gr.Button("Generate Responses")
+                
+                with gr.Column(scale=2):
+                    # Results section
+                    gr.Markdown("### Generated Responses")
+                    response_boxes = []
+                    for i in range(5):
+                        response_box = gr.Textbox(
+                            label=f"Response {i+1}", 
+                            lines=3, 
+                            interactive=False
+                        )
+                        response_boxes.append(response_box)
+                    
+                    # Feedback section
+                    gr.Markdown("### Provide Feedback")
+                    like_all_responses = gr.Checkbox(
+                        label="I like all responses",
+                        info="Check this if you like all the generated responses"
+                    )
+                    selected_response = gr.Radio(
+                        choices=[f"Response {i+1}" for i in range(5)], 
+                        label="Select Best Response (Optional)",
+                        info="Select your favorite response (if you haven't checked 'I like all responses')"
+                    )
+                    feedback_rating = gr.Slider(
+                        minimum=1, 
+                        maximum=5, 
+                        step=1, 
+                        label="Rate Quality (1-5)", 
+                        value=3
+                    )
+                    feedback_text = gr.Textbox(
+                        label="Additional Feedback (Optional)", 
+                        placeholder="What did you like or dislike about the responses?",
+                        lines=2
+                    )
+                    save_btn = gr.Button("Save Feedback")
+                    feedback_status = gr.Textbox(label="Status", interactive=False)
+        
+        with gr.TabItem("View Previous Feedback"):
+            gr.Markdown("### Previously Collected Feedback")
+            refresh_btn = gr.Button("Refresh Data")
+            feedback_data = gr.Dataframe(label="Feedback Data")
+    
+    # Set initial default values for prompt and context
+    initial_prompt, initial_context = update_task_template(TASKS[0])
+    prompt.value = initial_prompt
+    context.value = initial_context
+    
+    # Set up event handlers
+    load_model_btn.click(
+        fn=load_model, 
+        inputs=[model_choice], 
+        outputs=[model_status]
+    )
+    
+    task_choice.change(
+        fn=update_task_template, 
+        inputs=[task_choice], 
+        outputs=[prompt, context]
+    )
+    
+    generate_btn.click(
+        fn=generate_responses, 
+        inputs=[task_choice, context, prompt, model_choice], 
+        outputs=response_boxes
+    )
+    
+    save_btn.click(
+        fn=save_feedback,
+        inputs=[
+            task_choice, model_choice, prompt, context, 
+            response_boxes[0], response_boxes[1], response_boxes[2], response_boxes[3], response_boxes[4],
+            like_all_responses, selected_response, feedback_rating, feedback_text
+        ],
+        outputs=[feedback_status]
+    )
+    
+    like_all_responses.change(
+        fn=toggle_response_selector,
+        inputs=[like_all_responses],
+        outputs=[selected_response]
+    )
+    
+    refresh_btn.click(
+        fn=load_feedback_data,
+        inputs=[],
+        outputs=[feedback_data]
+    )
 
-            get_resp_btn = gr.Button("Submit")
-            taskchoice.change(fn=change_textboxes, inputs=[taskchoice, context, prompt], outputs=[prompt, context])
-            modelchoice.change(fn=change_response_button, inputs=[modelchoice, get_resp_btn], outputs=[get_resp_btn])
-            modelchoice.change(fn=load_model, inputs=[modelchoice, get_resp_btn], outputs=[get_resp_btn])
+# Set default values on page load
+def set_defaults():
+    initial_prompt, initial_context = update_task_template(TASKS[0])
+    return initial_prompt, initial_context
 
- 
-        with gr.Column(scale=2):
-            new_title = gr.Textbox()
-            new_title2 = gr.Textbox()
-            new_title3 = gr.Textbox()
-            new_title4 = gr.Textbox()
-            new_title5 = gr.Textbox()
-            get_resp_btn.click(fn=predict, inputs=[taskchoice, context, prompt, modelchoice], outputs=[new_title,new_title2,new_title3,new_title4,new_title5])
-
-            btn = gr.Button("Flag")
-            # callback.setup([taskchoice, context, prompt , new_title,new_title2,new_title3,new_title4,new_title5], "flagged_data_points_new")
-            # btn.click(lambda *args: callback.flag(args), [taskchoice, context, prompt , new_title,new_title2,new_title3,new_title4,new_title5], None, preprocess=False)
-            btn.click(fn=save, inputs=[taskchoice, modelchoice, context, prompt , new_title,new_title2,new_title3,new_title4,new_title5])
-
-
-
-demo.launch(share=False,debug=False,server_name="0.0.0.0", server_port=8051)
+if __name__ == "__main__":
+    # Launch the app
+    demo.launch(
+        share=False,
+        debug=False,
+        server_name="0.0.0.0", 
+        server_port=8051
+    )
